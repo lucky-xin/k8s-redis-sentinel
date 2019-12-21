@@ -1,9 +1,13 @@
 # k8s Redis 哨兵模式，AOF数据持久化，以及SpringBoot sentinel方式连接
 ```text
 定义了无头服务redis-svc用于k8s进群内部访问，StatefullSet的serviceName和Headless服务名称必须一致。
-定义了NodePort用于外部访问，启动时第一个启动的pod为主节点，
+定义了NodePort用于外部访问，启动时第一个启动的pod为主节点。公共部分配置从config-map之中获取。
+使用initContainers来初始化所有的配置文件，把配置文件都挂载到同一个volumeMounts之中initContainers来写配置文件
+redis以及sentinel再从同一个volumeMounts之中获取配置文件
+如果pods编号为redis-0则设置为主节点，其他节点访问主节点方式为
+{pod-name}.{service-name}.{namespace}.svc.cluster.local，可以进入到pod中查看/etc/hosts
+service-name为定义的Headless服务名称
 ```
-
 ## 在当前项目的redis-sentinel目录下执行
 ```shell script
 kubectl apply -f host-path-pv.yaml
