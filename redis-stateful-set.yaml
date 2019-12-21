@@ -20,9 +20,26 @@ metadata:
     app: redis-sentinel
 spec:
   ports:
-    - name: sentinel-port
+    - name: redis-port
       port: 26379
       targetPort: 26379
+      nodePort: 30037
+  type: NodePort
+  selector:
+    app: redis-sentinel
+---
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    app: redis-sentinel
+spec:
+  ports:
+    - name: redis-port
+      port: 6379
+      targetPort: 6379
       nodePort: 30637
   type: NodePort
   selector:
@@ -68,7 +85,7 @@ spec:
               masterauth $REDIS_PWD
               logfile redis.log
               EOF
-              cat>>/mnt/config/sentinel/redis.conf<<EOF
+              cat>/mnt/config/sentinel/redis.conf<<EOF
               port 26379
               sentinel monitor $REDIS_MASTER_NAME $MASTER_IP $REDIS_MASTER_PORT $QUORUM
               sentinel down-after-milliseconds $REDIS_MASTER_NAME $DOWN_AFTER

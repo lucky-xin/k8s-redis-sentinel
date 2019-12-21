@@ -8,6 +8,14 @@ redis以及sentinel再从同一个volumeMounts之中获取配置文件
 {pod-name}.{service-name}.{namespace}.svc.cluster.local，可以进入到pod中查看/etc/hosts
 service-name为定义的Headless服务名称
 ```
+## sentinel 必须等redis准备就绪之后再启动,使用一下脚本阻塞
+```shell script
+until redis-cli -p 6379 -a $REDIS_PWD info replication; do
+  echo "Waiting for redis to be ready (accepting connections)"
+  sleep 5
+done
+```
+
 ## 在当前项目的redis-sentinel目录下执行
 ```shell script
 kubectl apply -f host-path-pv.yaml
