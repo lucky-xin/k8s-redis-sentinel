@@ -13,6 +13,11 @@ kubectl apply -f redis-stateful-set.yaml
 ```
 
 ## 待服务都启动
+### 查看pods信息如下：
+![](https://github.com/lucky-xin/k8s-redis-sentinel/blob/master/.img/redis-stateful-set.png)
+
+### 查看service信息如下：
+![](https://github.com/lucky-xin/k8s-redis-sentinel/blob/master/.img/redis-svc.png)
 ## 执行
 ```shell script
 kubectl exec -it redis-0 -c redis -- redis-cli -p 6379 -a 'Data*2019*' info replication
@@ -86,7 +91,7 @@ repl_backlog_size:1048576
 repl_backlog_first_byte_offset:4931
 repl_backlog_histlen:657066
 ```
-## 此时主节点为redis_master ip为192.168.1.7 端口为6379
+## 此时主节点ip为10.1.3.222 端口为6379
 
 执行
 ```shell script
@@ -247,4 +252,4 @@ public class RedisConfiguration {
 }
 ```
 ### SpringBoot启动日志如下：
-![]()
+![](https://github.com/lucky-xin/k8s-redis-sentinel/blob/master/.img/SpringBoot%20Sentinel.png)
