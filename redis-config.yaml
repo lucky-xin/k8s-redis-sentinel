@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  labels:
+    app: redis-sentinel
+data:
+  QUORUM: "2"
+  DOWN_AFTER: "30000"
+  FAILOVER_TIMEOUT: "180000"
+  PARALLEL_SYNCS: "1"
+  REDIS_MASTER_PORT: "6379"
+  REDIS_MASTER_NAME: "redis_master"
+  redis.conf: |
+    bind 0.0.0.0
+    appendonly yes
+    notify-keyspace-events Eglx
+    daemonize no

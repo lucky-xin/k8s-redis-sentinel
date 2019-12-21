@@ -1,0 +1,233 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-svc
+  labels:
+    app: redis-sentinel
+spec:
+  ports:
+    - name: redis-port
+      port: 6379
+  clusterIP: None
+  selector:
+    app: redis-sentinel
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentinel
+  labels:
+    app: redis-sentinel
+spec:
+  ports:
+    - name: sentinel-port
+      port: 26379
+      targetPort: 26379
+      nodePort: 30637
+  type: NodePort
+  selector:
+    app: redis-sentinel
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+spec:
+  selector:
+    matchLabels:
+      app: redis-sentinel
+  serviceName: "redis-svc"
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: redis-sentinel
+    spec:
+      initContainers:
+        - name: init-redis
+          image: redis:5.0.7
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - "-c"
+            - |
+              set -ex
+              # Generate redis server-id from pod ordinal index.
+              [[ `hostname` =~ -([0-9]+)$ ]] || exit 1
+              ordinal=${BASH_REMATCH[1]}
+              cat /mnt/config-map/redis.conf > /mnt/config/redis/redis.conf
+              if [[ $ordinal -ne 0 ]]; then
+                MASTER_IP=${REDIS_POD_NAME}-0.${REDIS_SERVICE_NAME}
+                echo "slaveof $MASTER_IP $REDIS_MASTER_PORT" >> /mnt/config/redis/redis.conf
+              else
+                MASTER_IP=${SERVER_IP}
+              fi
+              cat>>/mnt/config/redis/redis.conf<<EOF
+              port 6379
+              requirepass $REDIS_PWD
+              masterauth $REDIS_PWD
+              logfile redis.log
+              EOF
+              cat>>/mnt/config/sentinel/redis.conf<<EOF
+              port 26379
+              sentinel monitor $REDIS_MASTER_NAME $MASTER_IP $REDIS_MASTER_PORT $QUORUM
+              sentinel down-after-milliseconds $REDIS_MASTER_NAME $DOWN_AFTER
+              sentinel failover-timeout $REDIS_MASTER_NAME $FAILOVER_TIMEOUT
+              sentinel parallel-syncs $REDIS_MASTER_NAME $PARALLEL_SYNCS
+              sentinel auth-pass $REDIS_MASTER_NAME $REDIS_PWD
+              EOF
+          env:
+            - name: REDIS_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PWD
+            - name: REDIS_POD_NAME
+              value: redis
+            - name: REDIS_SERVICE_NAME
+              value: redis-svc
+            - name: SERVER_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          envFrom:
+            - configMapRef:
+                name: redis-config
+          volumeMounts:
+            - name: redis-conf
+              mountPath: /mnt/config/redis
+            - name: sentinel-conf
+              mountPath: /mnt/config/sentinel
+            - name: config-map
+              mountPath: /mnt/config-map
+      containers:
+        - name: redis
+          image: redis:5.0.7
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - "-c"
+            - |
+              exec redis-server /usr/local/etc/redis/redis.conf
+          env:
+            - name: REDIS_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PWD
+          envFrom:
+            - configMapRef:
+                name: redis-config
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              subPath: redis
+            - name: redis-conf
+              mountPath: /usr/local/etc/redis
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            exec:
+              command:
+                - bash
+                - "-c"
+                - |
+                  set -ex
+                  redis-cli -p $REDIS_MASTER_PORT -a $REDIS_PWD ping
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              # Check we can execute queries over TCP (skip-networking is off).
+              command:
+                - bash
+                - "-c"
+                - |
+                  set -ex
+                  redis-cli -p $REDIS_MASTER_PORT -a $REDIS_PWD ping
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+        - name: sentinel
+          image: redis:5.0.7
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - "-c"
+            - |
+              set -ex
+              until redis-cli -p 6379 -a $REDIS_PWD info replication; do
+              echo "Waiting for redis to be ready (accepting connections)"
+              sleep 5
+              done
+              echo "Initializing replication from clone position"
+              redis-server /usr/local/etc/redis/redis.conf --sentinel
+          ports:
+            - name: sentinel
+              containerPort: 26379
+          env:
+            - name: REDIS_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_PWD
+          envFrom:
+            - configMapRef:
+                name: redis-config
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              subPath: sentinel
+            - name: sentinel-conf
+              mountPath: /usr/local/etc/redis/
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          livenessProbe:
+            exec:
+              command:
+                - bash
+                - "-c"
+                - |
+                  set -ex
+                  redis-cli -p 26379 -a $REDIS_PWD ping
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - "-c"
+                - |
+                  set -ex
+                  redis-cli -p 26379 -a $REDIS_PWD ping
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: redis-conf
+          emptyDir: {}
+        - name: sentinel-conf
+          emptyDir: {}
+        - name: config-map
+          configMap:
+            name: redis-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        selector:
+          matchLabels:
+            pv: host-path
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
